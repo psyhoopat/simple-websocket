@@ -16,45 +16,80 @@ func main() {
 	http.ListenAndServe(":8000", nil)
 }
 
+// создать веб-сокет
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Пропускаем любой запрос
+	},
 }
 
+// сохранить клиентов
 var users = make(map[*websocket.Conn]bool)
 
+// WebSocket хэндлер
 func wsHandler(w http.ResponseWriter, r *http.Request) {
+
+	// при запросе подключаем соединение
 	conn, err := upgrader.Upgrade(w, r, nil)
+
+	// разрыв соединение при неправильной работы
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	defer conn.Close()
+	// отложеная функция - закрывает соединение и удаляет из хеш таблицы соединение, defer гарантирует на разрыв соединения
+	defer func(conn *websocket.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Println(err)
+		}
+		delete(users, conn)
+	}(conn)
 
+	// в ключ мапа передать соединение
 	users[conn] = true
+	fmt.Println("User connected")
+	fmt.Println(users)
 
+	// слушает сообщения
 	for {
-		messageType, p, err := conn.ReadMessage()
+		//messageType, p, err := conn.ReadMessage()
+		// получает тип данных и сообшение клиента
+		_, message, err := conn.ReadMessage()
+
+		// разрыв соединение если что то пойдет не так
 		if err != nil {
 			log.Println(err)
 			return
 		}
 
-		fmt.Printf("Message: %s\n", p)
-		for user := range users {
-			if err := user.WriteMessage(messageType, p); err != nil {
-				log.Println(err)
-				return
-			}
+		fmt.Printf("Message: %s\n", message)
+
+		// горутина - рассылка сообщение всем клиентам
+		go writeMessage(message)
+	}
+}
+
+// распространяет сообщение всем клиентам
+func writeMessage(message []byte) {
+	// для каждого клиента из мапа клиентов отправляется сообщение
+	for conn := range users {
+		if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			log.Println(err)
+			return
 		}
 	}
 }
 
+// шаблон html - view chat
 func home(w http.ResponseWriter, r *http.Request) {
-	homeTemplate.Execute(w, "ws://"+r.Host+"/echo")
+	homeTemplate.Execute(w, "ws://"+r.Host+"/ws")
 }
 
+// парсинг текста
 var homeTemplate = template.Must(template.New("").Parse(`
 <!DOCTYPE html>
 <html>
@@ -78,7 +113,7 @@ window.addEventListener("load", function(evt) {
         if (ws) {
             return false;
         }
-        ws = new WebSocket("ws://localhost:8000/ws");
+        ws = new WebSocket("{{.}}");
         ws.onopen = function(evt) {
             print("OPEN");
         }
