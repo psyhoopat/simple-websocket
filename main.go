@@ -21,6 +21,8 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+var users = make(map[*websocket.Conn]bool)
+
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -30,15 +32,21 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer conn.Close()
 
+	users[conn] = true
+
 	for {
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		if err := conn.WriteMessage(messageType, p); err != nil {
-			log.Println(err)
-			return
+
+		fmt.Printf("Message: %s\n", p)
+		for user := range users {
+			if err := user.WriteMessage(messageType, p); err != nil {
+				log.Println(err)
+				return
+			}
 		}
 	}
 }
